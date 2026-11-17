@@ -174,23 +174,54 @@ class AccountingService
             $totalDebit += $taxAmount;
         }
 
-        // 3. Credit Side: Settlement Account (Bank/Cash or Supplier)
-        // We use the calculated totalDebit to ensure the entry is always balanced
-        if ($totalDebit > 0) {
-            // استخدام حساب المورد الفرعي (2101-S*) إذا كان هناك مورد ولم يتم الدفع نقداً
-            if ($purchase->supplier && ! $purchase->paymentAccount) {
-                $creditAccount = $purchase->supplier->account;
-            } else {
-                $creditAccount = $this->settlementAccountForPurchase($purchase);
-            }
-            
+        // 3. Credit Side: split a partially paid purchase between settlement
+        // and the supplier payable account. The debit side is the purchase
+        // total (net plus input VAT), while the credits must reflect the
+        // amount already paid and the remaining balance due.
+        $purchaseTotal = $this->normalizeAmount((float) $purchase->total);
+        $paidAmount = $this->normalizeAmount(min(max((float) $purchase->paid_amount, 0), $purchaseTotal));
+        $balanceDue = $this->normalizeAmount(max($purchaseTotal - $paidAmount, 0));
+
+        if ($paidAmount > 0) {
             $this->pushLine(
                 $lines,
-                $creditAccount,
-                'إثبات استحقاق/سداد طلب الشراء ' . $purchase->purchase_number,
+                $this->settlementAccountForPurchase($purchase),
+                'إثبات سداد طلب الشراء ' . $purchase->purchase_number,
                 0,
-                $totalDebit,
+                $paidAmount,
             );
+        }
+
+        if ($balanceDue > 0 && $purchase->supplier) {
+            $this->pushLine(
+                $lines,
+                $purchase->supplier->account,
+                'إثبات رصيد المورد لطلب الشراء ' . $purchase->purchase_number,
+                0,
+                $balanceDue,
+            );
+        } elseif ($balanceDue > 0) {
+            $this->pushLine(
+                $lines,
+                $this->settlementAccountForPurchase($purchase),
+                'إثبات استحقاق طلب الشراء ' . $purchase->purchase_number,
+                0,
+                $balanceDue,
+            );
+        }
+
+        // Keep the journal balanced even when legacy data has a total that
+        // differs from the sum of its item lines.
+        $creditedTotal = $this->normalizeAmount($paidAmount + $balanceDue);
+        if ($totalDebit !== $creditedTotal) {
+            $difference = $this->normalizeAmount($totalDebit - $creditedTotal);
+            $target = $balanceDue > 0 && $purchase->supplier
+                ? $purchase->supplier->account
+                : $this->settlementAccountForPurchase($purchase);
+
+            if ($difference > 0) {
+                $this->pushLine($lines, $target, 'تسوية فرق قيد طلب الشراء ' . $purchase->purchase_number, 0, $difference);
+            }
         }
 
         return $this->syncJournalEntry(

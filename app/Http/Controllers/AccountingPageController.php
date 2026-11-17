@@ -1294,10 +1294,12 @@ class AccountingPageController extends Controller
                 $account->balance = (float) $inventoryValueFromProducts;
             } else {
                 $balanceData = $balances->get($account->id);
-                $debit = $balanceData ? (float) $balanceData->total_debit : 0;
-                $credit = $balanceData ? (float) $balanceData->total_credit : 0;
+                $debit = $balanceData ? (float) $balanceData->total_debit : null;
+                $credit = $balanceData ? (float) $balanceData->total_credit : null;
 
-                if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
+                if ($balanceData === null) {
+                    $account->balance = (float) $account->balance;
+                } elseif (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
                     $account->balance = $debit - $credit;
                 } else {
                     $account->balance = $credit - $debit;
@@ -2594,7 +2596,7 @@ class AccountingPageController extends Controller
         })->values();
     }
 
-    private function buildAccountTree(Collection $accounts): array
+    private function buildAccountTree(Collection $accounts): Collection
     {
         return $this->nestAccounts($accounts, null);
     }
@@ -2654,7 +2656,7 @@ class AccountingPageController extends Controller
         return $ancestors;
     }
 
-    private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): array
+    private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): Collection
     {
         $includedIds = [];
         $accountsById = $allAccounts->keyBy('id');
@@ -2671,7 +2673,7 @@ class AccountingPageController extends Controller
         return $this->nestAccounts($allAccounts->whereIn('id', array_keys($includedIds))->values(), null);
     }
 
-    private function nestAccounts(Collection $accounts, ?int $parentId): array
+    private function nestAccounts(Collection $accounts, ?int $parentId): Collection
     {
         // استخدم rolled_up_balance المحسوب مسبقاً إذا كان موجوداً (من جميع الحسابات)
         // وإلا احسبه من الحسابات الحالية
@@ -2687,30 +2689,22 @@ class AccountingPageController extends Controller
             ? $preCalculatedBalances
             : $this->calculateAllRolledUpBalances($accounts);
 
-        // Build flat array with just essential data - NO CHILDREN to avoid memory issues
-        $result = [];
-        foreach ($accounts as $account) {
-            // Only include accounts with matching parent_id
-            if ($account->parent_id === $parentId) {
-                $result[] = [
-                    'id' => $account->id,
-                    'code' => $account->code,
-                    'name' => $account->name,
-                    'name_ar' => $account->name_ar,
-                    'account_type' => $account->account_type,
-                    'display_account_type' => $account->display_account_type,
-                    'description' => $account->description,
-                    'balance' => (float) $account->balance,
-                    'parent_id' => $account->parent_id,
-                    'is_system' => $account->is_system,
-                    'allows_direct_transactions' => $account->allows_direct_transactions,
-                    'rolled_up_balance' => $rolledUpBalances[$account->id] ?? (float) $account->balance,
-                ];
-            }
-        }
+        $result = $accounts
+            ->filter(function (Account $account) use ($parentId): bool {
+                if ($parentId === null) {
+                    return $account->parent_id === null || (int) $account->parent_id === 0;
+                }
 
-        // Sort by code
-        usort($result, fn($a, $b) => strcmp($a['code'], $b['code']));
+                return (int) $account->parent_id === $parentId;
+            })
+            ->sortBy('code')
+            ->values()
+            ->map(function (Account $account) use ($accounts, $rolledUpBalances) {
+                $account->setAttribute('rolled_up_balance', $rolledUpBalances[$account->id] ?? (float) $account->balance);
+                $account->setRelation('children', $this->nestAccounts($accounts, (int) $account->id));
+
+                return $account;
+            });
 
         // Build lookup for all accounts (for finding children in view)
         $allAccountsById = [];
