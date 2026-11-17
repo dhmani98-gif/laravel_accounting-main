@@ -1652,6 +1652,25 @@ class AccountingPageController extends Controller
         return view('journal_entry_show', compact('company', 'journalEntry', 'sourceContext'));
     }
 
+    /**
+     * Keep direct callers of the former controller API working while reports
+     * are served by ReportsController.
+     */
+    public function reports(Request $request): View
+    {
+        return app(ReportsController::class)->reports($request);
+    }
+
+    public function reportShow(Request $request, string $report): View
+    {
+        return app(ReportsController::class)->reportShow($request, $report);
+    }
+
+    public function operationsActivityReport(Request $request): View
+    {
+        return app(ReportsController::class)->operationsActivityReport($request);
+    }
+
 
     private function unsupportedInteractiveReport(string $message): array
     {
