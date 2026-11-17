@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AccountingPageController;
+use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\UserManagementController;
 
@@ -98,9 +99,9 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
     });
 
     Route::middleware('permission:view_reports')->group(function () {
-        Route::get('/reports', [AccountingPageController::class, 'reports'])->name('reports');
-        Route::get('/reports/operations-activity', [AccountingPageController::class, 'operationsActivityReport'])->name('reports.operations_activity');
-        Route::get('/reports/view/{report}', [AccountingPageController::class, 'reportShow'])->name('reports.show');
+        Route::get('/reports', [ReportsController::class, 'reports'])->name('reports');
+        Route::get('/reports/operations-activity', [ReportsController::class, 'operationsActivityReport'])->name('reports.operations_activity');
+        Route::get('/reports/view/{report}', [ReportsController::class, 'reportShow'])->name('reports.show');
         Route::get('/reports/inventory', [AccountingPageController::class, 'inventoryReport'])->name('reports.inventory');
         Route::get('/reports/financial', [AccountingPageController::class, 'financialReport'])->name('reports.financial');
     });
